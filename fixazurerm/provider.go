@@ -48,8 +48,17 @@ func Provider() terraform.ResourceProvider {
 			},
 		},
 		ResourcesMap: map[string]*schema.Resource{
-
+			// These resources use the Azure ARM SDK
 			"fixazurerm_instance": instanceHi(),
+			"fixazurerm_network_interface":       resourceArmNetworkInterface(),
+			"fixazurerm_public_ip":                 resourceArmPublicIp(),
+			"fixazurerm_route":                     resourceArmRoute(),
+			"fixazurerm_route_table":               resourceArmRouteTable(),
+			"fixazurerm_subnet":                    resourceArmSubnet(),
+			"fixazurerm_virtual_network":           resourceArmVirtualNetwork(),
+
+			// These resources use the Riviera SDK
+			"fixazurerm_resource_group":    resourceArmResourceGroup(),
 		},
 
 		ConfigureFunc: providerConfigure,
@@ -57,14 +66,14 @@ func Provider() terraform.ResourceProvider {
 }
 
 type Config struct {
-	AccessKey string
+	AccessKey               string
 
-	ManagementURL string
+	ManagementURL           string
 
-	SubscriptionID string
-	ClientID       string
-	ClientSecret   string
-	TenantID       string
+	SubscriptionID          string
+	ClientID                string
+	ClientSecret            string
+	TenantID                string
 
 	validateCredentialsOnce sync.Once
 }
@@ -101,8 +110,6 @@ func providerConfigure(d *schema.ResourceData) (interface{}, error) {
 		ClientSecret:   d.Get("client_secret").(string),
 		TenantID:       d.Get("tenant_id").(string),
 	}
-
-	log.Println("HELLOOOOOOOO!!!!")
 
 	f, err := os.Create("/tmp/fixazurerm")
 	defer f.Close()
