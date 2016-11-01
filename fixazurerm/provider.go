@@ -14,15 +14,10 @@ import (
 	riviera "github.com/jen20/riviera/azure"
 )
 
+// Provider returns a terraform.ResourceProvider.
 func Provider() terraform.ResourceProvider {
 	return &schema.Provider{
 		Schema: map[string]*schema.Schema{
-			"access_key": {
-				Type:        schema.TypeString,
-				Optional:    true,
-				Default:     "",
-				Description: "bob!!",
-			},
 			"subscription_id": {
 				Type:        schema.TypeString,
 				Required:    true,
@@ -54,7 +49,11 @@ func Provider() terraform.ResourceProvider {
 			"fixazurerm_public_ip":                 resourceArmPublicIp(),
 			"fixazurerm_route":                     resourceArmRoute(),
 			"fixazurerm_route_table":               resourceArmRouteTable(),
+			"fixazurerm_storage_account":           resourceArmStorageAccount(),
+			"fixazurerm_storage_blob":              resourceArmStorageBlob(),
+			"fixazurerm_storage_container":         resourceArmStorageContainer(),
 			"fixazurerm_subnet":                    resourceArmSubnet(),
+			"fixazurerm_virtual_machine":           resourceArmVirtualMachine(),
 			"fixazurerm_virtual_network":           resourceArmVirtualNetwork(),
 
 			// These resources use the Riviera SDK
@@ -65,9 +64,9 @@ func Provider() terraform.ResourceProvider {
 	}
 }
 
+// Config is the configuration structure used to instantiate a
+// new Azure management client.
 type Config struct {
-	AccessKey               string
-
 	ManagementURL           string
 
 	SubscriptionID          string
@@ -104,7 +103,6 @@ func (c *Config) validate() error {
 
 func providerConfigure(d *schema.ResourceData) (interface{}, error) {
 	config := &Config{
-		AccessKey:      d.Get("access_key").(string),
 		SubscriptionID: d.Get("subscription_id").(string),
 		ClientID:       d.Get("client_id").(string),
 		ClientSecret:   d.Get("client_secret").(string),
@@ -134,6 +132,26 @@ func providerConfigure(d *schema.ResourceData) (interface{}, error) {
 	return client, nil
 }
 
+func registerProviderWithSubscription(providerName string, client *riviera.Client) error {
+	request := client.NewRequest()
+	request.Command = riviera.RegisterResourceProvider{
+		Namespace: providerName,
+	}
+
+	response, err := request.Execute()
+	if err != nil {
+		return fmt.Errorf("Cannot request provider registration for Azure Resource Manager: %s.", err)
+	}
+
+	if !response.IsSuccessful() {
+		return fmt.Errorf("Credentials for accessing the Azure Resource Manager API are likely " +
+			"to be incorrect, or\n  the service principal does not have permission to use " +
+			"the Azure Service Management\n  API.")
+	}
+
+	return nil
+}
+
 var providerRegistrationOnce sync.Once
 
 // registerAzureResourceProvidersWithSubscription uses the providers client to register
@@ -144,10 +162,7 @@ func registerAzureResourceProvidersWithSubscription(client *riviera.Client) erro
 	var err error
 	providerRegistrationOnce.Do(func() {
 		// We register Microsoft.Compute during client initialization
-		providers := []string{
-			"Microsoft.Network", "Microsoft.Cdn", "Microsoft.Storage", "Microsoft.Sql",
-			"Microsoft.Search", "Microsoft.Resources", "Microsoft.ServiceBus",
-		}
+		providers := []string{"Microsoft.Network", "Microsoft.Cdn", "Microsoft.Storage", "Microsoft.Sql", "Microsoft.Search", "Microsoft.Resources", "Microsoft.ServiceBus", "Microsoft.KeyVault", "Microsoft.EventHub"}
 
 		var wg sync.WaitGroup
 		wg.Add(len(providers))
@@ -176,3 +191,10 @@ func azureRMNormalizeLocation(location interface{}) string {
 
 // armMutexKV is the instance of MutexKV for ARM resources
 var armMutexKV = mutexkv.NewMutexKV()
+
+
+// Resource group names can be capitalised, but we store them in lowercase.
+// Use a custom diff function to avoid creation of new resources.
+func resourceAzurermResourceGroupNameDiffSuppress(k, old, new string, d *schema.ResourceData) bool {
+	return strings.ToLower(old) == strings.ToLower(new)
+}

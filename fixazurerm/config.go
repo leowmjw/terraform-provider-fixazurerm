@@ -8,6 +8,8 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/arm/cdn"
 	"github.com/Azure/azure-sdk-for-go/arm/compute"
+	"github.com/Azure/azure-sdk-for-go/arm/eventhub"
+	"github.com/Azure/azure-sdk-for-go/arm/keyvault"
 	"github.com/Azure/azure-sdk-for-go/arm/network"
 	"github.com/Azure/azure-sdk-for-go/arm/resources/resources"
 	"github.com/Azure/azure-sdk-for-go/arm/scheduler"
@@ -24,6 +26,10 @@ import (
 // ArmClient contains the handles to all the specific Azure Resource Manager
 // resource classes' respective clients.
 type ArmClient struct {
+	clientId       string
+	tenantId       string
+	subscriptionId string
+
 	rivieraClient *riviera.Client
 
 	availSetClient         compute.AvailabilitySetsClient
@@ -53,9 +59,12 @@ type ArmClient struct {
 	cdnProfilesClient  cdn.ProfilesClient
 	cdnEndpointsClient cdn.EndpointsClient
 
+	eventHubNamespacesClient eventhub.NamespacesClient
+
 	providers           resources.ProvidersClient
 	resourceGroupClient resources.GroupsClient
 	tagsClient          resources.TagsClient
+	resourceFindClient  resources.Client
 
 	jobsClient            scheduler.JobsClient
 	jobsCollectionsClient scheduler.JobCollectionsClient
@@ -71,6 +80,8 @@ type ArmClient struct {
 	serviceBusNamespacesClient    servicebus.NamespacesClient
 	serviceBusTopicsClient        servicebus.TopicsClient
 	serviceBusSubscriptionsClient servicebus.SubscriptionsClient
+
+	keyVaultClient keyvault.VaultsClient
 }
 
 func withRequestLogging() autorest.SendDecorator {
@@ -106,31 +117,15 @@ func setUserAgent(client *autorest.Client) {
 	client.UserAgent = fmt.Sprintf("HashiCorp-Terraform-v%s", version)
 }
 
-func registerProviderWithSubscription(providerName string, client *riviera.Client) error {
-	request := client.NewRequest()
-	request.Command = riviera.RegisterResourceProvider{
-		Namespace: providerName,
-	}
-
-	response, err := request.Execute()
-	if err != nil {
-		return fmt.Errorf("Cannot request provider registration for Azure Resource Manager: %s.", err)
-	}
-
-	if !response.IsSuccessful() {
-		return fmt.Errorf("Credentials for accessing the Azure Resource Manager API are likely " +
-			"to be incorrect, or\n  the service principal does not have permission to use " +
-			"the Azure Service Management\n  API.")
-	}
-
-	return nil
-}
-
 // getArmClient is a helper method which returns a fully instantiated
 // *ArmClient based on the Config's current settings.
 func (c *Config) getArmClient() (*ArmClient, error) {
 	// client declarations:
-	client := ArmClient{}
+	client := ArmClient{
+		clientId:       c.ClientID,
+		tenantId:       c.TenantID,
+		subscriptionId: c.SubscriptionID,
+	}
 
 	rivieraClient, err := riviera.NewClient(&riviera.AzureResourceManagerCredentials{
 		ClientID:       c.ClientID,
@@ -217,6 +212,12 @@ func (c *Config) getArmClient() (*ArmClient, error) {
 	agc.Authorizer = spt
 	agc.Sender = autorest.CreateSender(withRequestLogging())
 	client.appGatewayClient = agc
+
+	ehnc := eventhub.NewNamespacesClient(c.SubscriptionID)
+	setUserAgent(&ehnc.Client)
+	ehnc.Authorizer = spt
+	ehnc.Sender = autorest.CreateSender(withRequestLogging())
+	client.eventHubNamespacesClient = ehnc
 
 	ifc := network.NewInterfacesClient(c.SubscriptionID)
 	setUserAgent(&ifc.Client)
@@ -314,6 +315,12 @@ func (c *Config) getArmClient() (*ArmClient, error) {
 	tc.Sender = autorest.CreateSender(withRequestLogging())
 	client.tagsClient = tc
 
+	rf := resources.NewClient(c.SubscriptionID)
+	setUserAgent(&rf.Client)
+	rf.Authorizer = spt
+	rf.Sender = autorest.CreateSender(withRequestLogging())
+	client.resourceFindClient = rf
+
 	jc := scheduler.NewJobsClient(c.SubscriptionID)
 	setUserAgent(&jc.Client)
 	jc.Authorizer = spt
@@ -386,6 +393,12 @@ func (c *Config) getArmClient() (*ArmClient, error) {
 	sbsc.Sender = autorest.CreateSender(withRequestLogging())
 	client.serviceBusSubscriptionsClient = sbsc
 
+	kvc := keyvault.NewVaultsClient(c.SubscriptionID)
+	setUserAgent(&kvc.Client)
+	kvc.Authorizer = spt
+	kvc.Sender = autorest.CreateSender(withRequestLogging())
+	client.keyVaultClient = kvc
+
 	return &client, nil
 }
 
@@ -425,6 +438,25 @@ func (armClient *ArmClient) getBlobStorageClientForStorageAccount(resourceGroupN
 	blobClient := storageClient.GetBlobService()
 	return &blobClient, true, nil
 }
+
+func (armClient *ArmClient) getFileServiceClientForStorageAccount(resourceGroupName, storageAccountName string) (*mainStorage.FileServiceClient, bool, error) {
+	key, accountExists, err := armClient.getKeyForStorageAccount(resourceGroupName, storageAccountName)
+	if err != nil {
+		return nil, accountExists, err
+	}
+	if accountExists == false {
+		return nil, false, nil
+	}
+
+	storageClient, err := mainStorage.NewBasicClient(storageAccountName, key)
+	if err != nil {
+		return nil, true, fmt.Errorf("Error creating storage client for storage account %q: %s", storageAccountName, err)
+	}
+
+	fileClient := storageClient.GetFileService()
+	return &fileClient, true, nil
+}
+
 func (armClient *ArmClient) getTableServiceClientForStorageAccount(resourceGroupName, storageAccountName string) (*mainStorage.TableServiceClient, bool, error) {
 	key, accountExists, err := armClient.getKeyForStorageAccount(resourceGroupName, storageAccountName)
 	if err != nil {
