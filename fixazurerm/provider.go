@@ -45,6 +45,7 @@ func Provider() terraform.ResourceProvider {
 		ResourcesMap: map[string]*schema.Resource{
 			// These resources use the Azure ARM SDK
 			"fixazurerm_instance": instanceHi(),
+			"fixazurerm_availability_set": resourceArmAvailabilitySet(),
 			"fixazurerm_network_interface":       resourceArmNetworkInterface(),
 			"fixazurerm_public_ip":                 resourceArmPublicIp(),
 			"fixazurerm_route":                     resourceArmRoute(),
