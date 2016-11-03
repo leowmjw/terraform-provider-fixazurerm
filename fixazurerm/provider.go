@@ -46,6 +46,12 @@ func Provider() terraform.ResourceProvider {
 			// These resources use the Azure ARM SDK
 			"fixazurerm_instance": instanceHi(),
 			"fixazurerm_availability_set": resourceArmAvailabilitySet(),
+
+			"fixazurerm_lb":                      resourceArmLoadBalancer(),
+			"fixazurerm_lb_backend_address_pool": resourceArmLoadBalancerBackendAddressPool(),
+			"fixazurerm_lb_probe":                resourceArmLoadBalancerProbe(),
+			"fixazurerm_lb_rule":                 resourceArmLoadBalancerRule(),
+
 			"fixazurerm_network_interface":       resourceArmNetworkInterface(),
 			"fixazurerm_public_ip":                 resourceArmPublicIp(),
 			"fixazurerm_route":                     resourceArmRoute(),
